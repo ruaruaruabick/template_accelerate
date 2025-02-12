@@ -1,0 +1,47 @@
+seed: 42
+
+dataloader:
+  batch_size : 12 # bs per gpu
+  shuffle : True
+  num_workers : 8 #0 for debug
+  pin_memory : True
+  drop_last : True
+  persistent_workers : True
+
+ema: .99
+
+training:
+  steps: 1000000 #or steps
+  max_grad_norm_d: 1000
+  max_grad_norm_g: 10
+  valid_interval: 1000
+  save_interval: 10000
+  gradient_accumulation_steps: 1
+  d_start_steps: -1
+  d_interval: 1
+
+optimizer:
+  g:
+    lr: 2.0e-4
+    betas: [.8,.9]
+    weight_decay: .01
+  d:
+    lr: 2.0e-4
+    betas: [.8,.9]
+    weight_decay: 1.0e-4
+
+scheduler:
+  g:
+    last_lr: 1.0e-5
+    warmup_steps: 10000
+  d:
+    last_lr: 1.0e-5
+    warmup_steps: 10000
+
+#Dataset b
+dataset:
+  train_file: 
+  valid_file: 
+  test_file: 
+
+# model
