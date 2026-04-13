@@ -5,8 +5,10 @@ from scipy import stats
 import json
 import logging
 import bisect
+from typing import List
+import ijson
 
-from torch.utils.data import Dataset,DataLoader
+from torch.utils.data import Dataset,DataLoader,IterableDataset
 import torch
 import torch.nn.functional as F
 
@@ -25,94 +27,58 @@ class CollateFn:
         return {
            
         }
-    
-class MyDataset(Dataset):
-    def __init__(self,filelist, config=None, use_cache=False):
-        self.data = filelist 
-        self.config = config
-        self.use_cache = use_cache
 
-        self.jsoncache ={} 
+class MyData(object):
+    def __init__(self, filelist, config=None,):
+        ...
+    def parsechunk(self, data):
+        ...
+    
+    
+class MyDataset(Dataset, MyData):
+    def __init__(self,*args, **kwargs):
+        MyData.__init__(self,*args, **kwargs)
+        Dataset.__init__(self)
         
         pass
 
     def __len__(self):
         return len(self.data)
     
-    
-    
-    
     def __getitem__(self, idx):
         try:
-            return self.__tgetitem__(idx)
+            return self.parsechunk(self.data[idx])
         except Exception as e:
             logger.warning(f"Warning in {self.data[idx]}: {e}")
             return None
-    def __tgetitem__(self, idx):
-        data = self.data[idx]
-        
-        
-        
-        return {
 
-        }
-
-
+class MyIterableDataset(IterableDataset,MyData):
+    def __init__(self, *args, **kwargs):
+        IterableDataset.__init__(self)
+        MyData.__init__(self,*args, **kwargs)
+        self.gpuid = torch.cuda.current_device()
     
-##############TEST##############
-if __name__ == '__main__':
-    from dataset import MyDataset
-    import yaml
-    from tqdm import tqdm
-    import json
-    from multiprocessing import Pool, Process
-        
-    def load_json(file_path,use_split=False, index=None):
-        if use_split:
-            assert index is not None
-            file_path = file_path.replace('.json', f'_{index}.json')
-            if index == 0:
-                print('###################Split Training Data###################')
-        with open(file_path, 'r') as f:
-            data = json.load(f)
-        return data 
-    #load config
-    config = yaml.load(open("config.yaml", "r"), Loader=yaml.FullLoader)
-    dataconfig = config['dataset']
-    #load data
-    train_list, valid_list, test_list = load_json(dataconfig['train_file']), load_json(dataconfig['valid_file']), load_json(dataconfig['test_file'])
-    for list in [train_list]:
-        training_dataset = MyDataset(list,dataconfig)
-        # #iter dataset
-        # maxlen = training_dataset.__len__()
-        
-        # num_process = 64
-        # patch = maxlen // num_process
-        # patch += 1 if maxlen % num_process != 0 else 0
-        
-        
-        # def check(idx):
-        #     num = 0
-        #     Nonenum = 0
-        #     for i in tqdm(range(patch*idx,min(patch*(idx+1),maxlen)),disable= (idx!= 0)):
-        #         if training_dataset.__getitem__(i) != None:
-        #             num += 1
-        #         else:
-        #             Nonenum += 1
-        #     print(num, Nonenum, patch)        
-            
-        # process_list = []
-        # for i in range(num_process):
-        #     p = Process(target=check, args=(i,))
-        #     p.start()
-        #     process_list.append(p)
-        # for p in process_list:
-        #     p.join()
-        # pass
-    
-        # iter dataloader
-        train_dataloader = DataLoader(training_dataset, batch_size=64, num_workers=64, shuffle=True, collate_fn=CollateFn(dataconfig['collate']))#
-        for i in tqdm(iter(train_dataloader)):
-            # break
-            pass
-        
+    def merged_chunks(self, filepoints: List):
+        for filepoint in filepoints:
+            yield from ijson.items(filepoint, 'item')
+
+    def __iter__(self,):
+        filepoints = [open(data,encoding='utf-8') for data in self.data]
+        ############parse workder set##################
+        worker_info = torch.utils.data.get_worker_info()
+        self.num_worker = 1 if worker_info is None else int(worker_info.num_workers)
+        worker_id = worker_info.id
+        readed_num = 0
+        ###################iter#################
+        for chunk in chunks:
+            if readed_num > self.skip_num and readed_num % self.num_worker == worker_id:
+                try:
+                    result = self.parsechunk(chunk)
+                except Exception as e:
+                    result = None
+                    print(e)
+                yield result
+            elif readed_num < self.skip_num and readed_num % 10000 == 0:
+                self.log(f"skiping,{readed_num},{self.skip_num}")
+            readed_num += 1 
+        self.log(f"OVER,{readed_num}")
